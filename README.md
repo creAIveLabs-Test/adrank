@@ -43,10 +43,21 @@ on the public Avazu dataset (~40M real ad impressions).
 
 - [x] Stage 0 — the world: ad inventory, synthetic users, feed UI, event logging, random-serving baseline
 - [x] Stage 1 — offline eval harness + baselines (random / popularity / logistic regression / oracle)
-- [ ] Stage 2 — pCTR model (LightGBM) + isotonic calibration + Avazu validation
+- [x] Stage 2 — pCTR model (champion selection: LR vs GBDT) + isotonic calibration
 - [ ] Stage 3 — two-tower retrieval + ANN
 - [ ] Stage 4 — GSP auction, budget pacing, auction debug panel
 - [ ] Stage 5 — experiments platform (bucketed A/B), Thompson exploration, nightly retrain loop
+
+## Results so far
+
+Offline (time-split test, 36k impressions): random AUC 0.500 · popularity 0.520
+· GBDT 0.542 · logreg 0.642 · oracle ceiling 0.760. Lab note: GBDT loses to LR
+here — the click function is smooth and near-log-linear in the CTR features, so
+LR's inductive bias wins at ~1k positives; at real ads scale the ordering flips,
+which is why deep CTR models exist. Reliability diagram: reports/.
+
+Online (live serving): random-v0 CTR 3.07% (36k imps) -> pctr-v1 CTR 6.85%
+(9k imps) — 2.2x uplift from the learned, calibrated ranker.
 
 ## Run it
 

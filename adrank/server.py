@@ -45,7 +45,7 @@ def serve_ads(user_id: int, page_category: str):
     with get_session() as s:
         if not s.get(SimUser, user_id):
             raise HTTPException(404, "unknown user")
-        ads, version = serve(s, page_category)
+        ads, version = serve(s, page_category, user_id)
         for pos, ad in enumerate(ads):
             s.add(Event(event_type="impression", user_id=user_id, ad_id=ad.id,
                         position=pos, page_category=page_category, served_by=version))
@@ -101,10 +101,20 @@ def stats():
         }
         for v in by_pos.values():
             v["ctr"] = round(v["clicks"] / v["impressions"], 4) if v["impressions"] else 0.0
+        versions = s.exec(select(Event.served_by).distinct()).all()
+        by_policy = {}
+        for v in versions:
+            vi = s.exec(select(func.count()).where(
+                Event.event_type == "impression", Event.served_by == v)).one()
+            vc = s.exec(select(func.count()).where(
+                Event.event_type == "click", Event.served_by == v)).one()
+            by_policy[v] = {"impressions": vi, "clicks": vc,
+                            "ctr": round(vc / vi, 4) if vi else 0.0}
     return {
         "impressions": imps,
         "clicks": clicks,
         "ctr": round(clicks / imps, 4) if imps else 0.0,
         "revenue": round(spend, 2),
         "by_position": by_pos,
+        "by_policy": by_policy,
     }

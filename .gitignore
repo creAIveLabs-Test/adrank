@@ -4,3 +4,4 @@ __pycache__/
 adrank.db
 uv.lock
 .DS_Store
+models/

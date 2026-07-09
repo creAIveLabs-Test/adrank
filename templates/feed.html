@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AdRank Demo Feed</title>
+<style>
+  :root{--bg:#f6f6f4;--ink:#1b1e24;--ink2:#5a5f68;--line:#ddddd6;--card:#fff;--ad:#f3efe6;--accent:#1f6d5a}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{border-bottom:2px solid var(--ink);padding:14px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;letter-spacing:-.01em}
+  header .tag{font:700 10px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;color:var(--ink2)}
+  select{font:inherit;padding:4px 8px}
+  .wrap{max-width:680px;margin:0 auto;padding:20px}
+  article{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:14px 18px;margin:12px 0}
+  article h2{font-size:16px;margin:0 0 4px}
+  article p{margin:0;color:var(--ink2);font-size:13.5px}
+  .ad{background:var(--ad);border:1px solid var(--line);border-radius:6px;padding:12px 16px;margin:12px 0;cursor:pointer}
+  .ad:hover{outline:2px solid var(--accent)}
+  .ad .lbl{font:700 9px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;color:var(--ink2)}
+  .ad h3{font-size:14.5px;margin:4px 0 2px}
+  .ad small{color:var(--ink2)}
+  .clicked{outline:2px solid var(--accent)}
+  #statsbar{font:12px ui-monospace,Menlo,monospace;color:var(--ink2)}
+</style>
+</head>
+<body>
+<header>
+  <h1>AdRank <span class="tag">DEMO FEED</span></h1>
+  <label>Persona
+    <select id="user">
+      {% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Topic
+    <select id="topic">
+      {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+  </label>
+  <button id="browse">Load page</button>
+  <span id="statsbar"></span>
+</header>
+
+<div class="wrap" id="feed"></div>
+
+<script>
+const ARTICLES = {
+  default: [
+    ["Weekly roundup", "Five things worth knowing this week."],
+    ["Deep dive", "A long read on how it actually works."],
+    ["Quick guide", "Get started in fifteen minutes."],
+    ["Interview", "A practitioner on lessons learned."],
+  ]
+};
+let served = null;
+
+async function browse() {
+  const user = document.getElementById("user").value;
+  const topic = document.getElementById("topic").value;
+  const r = await fetch(`/serve-ads?user_id=${user}&page_category=${topic}`);
+  served = await r.json();
+  const feed = document.getElementById("feed");
+  feed.innerHTML = "";
+  const arts = ARTICLES.default;
+  // Interleave: article, ad, article, ad ... (3 ad slots)
+  arts.forEach((a, i) => {
+    const art = document.createElement("article");
+    art.innerHTML = `<h2>${topic}: ${a[0]}</h2><p>${a[1]}</p>`;
+    feed.appendChild(art);
+    const slot = served.ads[i];
+    if (slot) {
+      const ad = document.createElement("div");
+      ad.className = "ad";
+      ad.innerHTML = `<span class="lbl">AD · SLOT ${slot.position + 1} · ${served.served_by}</span>
+        <h3>${slot.headline}</h3><small>${slot.advertiser} · ${slot.category}</small>`;
+      ad.onclick = async () => {
+        ad.classList.add("clicked");
+        await fetch("/event", {method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({user_id:+user, ad_id:slot.ad_id, position:slot.position,
+                                page_category:topic, served_by:served.served_by})});
+        refreshStats();
+      };
+      feed.appendChild(ad);
+    }
+  });
+  refreshStats();
+}
+
+async function refreshStats() {
+  const s = await (await fetch("/stats")).json();
+  document.getElementById("statsbar").textContent =
+    `${s.impressions} imps · ${s.clicks} clicks · CTR ${s.ctr} · $${s.revenue}`;
+}
+
+document.getElementById("browse").onclick = browse;
+refreshStats();
+</script>
+</body>
+</html>

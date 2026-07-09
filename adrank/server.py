@@ -45,7 +45,7 @@ def serve_ads(user_id: int, page_category: str):
     with get_session() as s:
         if not s.get(SimUser, user_id):
             raise HTTPException(404, "unknown user")
-        ads, version = serve(s, page_category, user_id)
+        ads, prices, version = serve(s, page_category, user_id)
         for pos, ad in enumerate(ads):
             s.add(Event(event_type="impression", user_id=user_id, ad_id=ad.id,
                         position=pos, page_category=page_category, served_by=version))
@@ -54,7 +54,8 @@ def serve_ads(user_id: int, page_category: str):
             "served_by": version,
             "ads": [
                 {"ad_id": ad.id, "position": pos, "advertiser": ad.advertiser,
-                 "headline": ad.headline, "category": ad.category}
+                 "headline": ad.headline, "category": ad.category,
+                 "price": prices[pos]}
                 for pos, ad in enumerate(ads)
             ],
         }
@@ -66,6 +67,7 @@ class ClickIn(BaseModel):
     position: int
     page_category: str
     served_by: str = "random-v0"
+    price: float | None = None   # auction CPC quoted at serve time
 
 
 @app.post("/event")
@@ -74,14 +76,49 @@ def click(ev: ClickIn):
         ad = s.get(Ad, ev.ad_id)
         if not ad:
             raise HTTPException(404, "unknown ad")
+        # GSP billing: charge the quoted auction price, never more than the bid.
+        # Pre-auction policies quote the full bid (first-price) — kept visible
+        # so the revenue comparison across policies stays honest.
+        price = min(ev.price, ad.bid) if ev.price is not None else ad.bid
         s.add(Event(event_type="click", user_id=ev.user_id, ad_id=ev.ad_id,
                     position=ev.position, page_category=ev.page_category,
-                    served_by=ev.served_by, price_paid=ad.bid))
-        # Stage 0 billing: charge the bid on click (simple CPC). Real GSP arrives in stage 4.
-        ad.spent_today = round(ad.spent_today + ad.bid, 4)
+                    served_by=ev.served_by, price_paid=price))
+        ad.spent_today = round(ad.spent_today + price, 4)
         s.add(ad)
         s.commit()
     return {"ok": True}
+
+
+@app.get("/debug/auction")
+def debug_auction(user_id: int, page_category: str, calibrated: bool = True):
+    """The 'why did this ad win' panel: the full auction board for one request.
+    Logs nothing. calibrated=false shows what raw (uncalibrated) pCTR would do
+    to prices — the calibration payoff, live."""
+    from .auction import run_auction
+    from .ranker import _retrieve_and_score
+
+    with get_session() as s:
+        scored = _retrieve_and_score(s, page_category, user_id, calibrated=calibrated)
+    board = run_auction(scored)
+    return {
+        "user_id": user_id, "page_category": page_category, "calibrated": calibrated,
+        "board": [
+            {"slot": a.slot, "advertiser": a.ad.advertiser, "category": a.ad.category,
+             "bid": a.ad.bid, "pctr": round(float(a.pctr), 5),
+             "ad_rank": round(float(a.ad_rank), 5),
+             "price": a.price,
+             "note": ("wins: pays min CPC to hold slot" if a.slot is not None else "")}
+            for a in board
+        ],
+    }
+
+
+@app.get("/auction", response_class=HTMLResponse)
+def auction_page(request: Request):
+    with get_session() as s:
+        users = s.exec(select(SimUser).limit(30)).all()
+    return templates.TemplateResponse(
+        request, "auction.html", {"users": users, "categories": CATEGORIES})
 
 
 @app.get("/stats")
@@ -108,8 +145,12 @@ def stats():
                 Event.event_type == "impression", Event.served_by == v)).one()
             vc = s.exec(select(func.count()).where(
                 Event.event_type == "click", Event.served_by == v)).one()
+            vrev = s.exec(select(func.sum(Event.price_paid)).where(
+                Event.event_type == "click", Event.served_by == v)).one() or 0.0
             by_policy[v] = {"impressions": vi, "clicks": vc,
-                            "ctr": round(vc / vi, 4) if vi else 0.0}
+                            "ctr": round(vc / vi, 4) if vi else 0.0,
+                            "revenue": round(vrev, 2),
+                            "rev_per_1k_imps": round(1000 * vrev / vi, 2) if vi else 0.0}
     return {
         "impressions": imps,
         "clicks": clicks,

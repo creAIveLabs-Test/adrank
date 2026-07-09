@@ -65,6 +65,7 @@ def run(base_url: str, n_sessions: int, pages_per_session: int = 3) -> None:
                             "user_id": user.id, "ad_id": ad.id,
                             "position": slot["position"], "page_category": page,
                             "served_by": payload["served_by"],
+                            "price": slot.get("price"),
                         }).raise_for_status()
             if (i + 1) % 100 == 0:
                 print(f"  {i+1}/{n_sessions} sessions · {imps} impressions · "

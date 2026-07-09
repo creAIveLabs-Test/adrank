@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AdRank Auction Panel</title>
+<style>
+  :root{--bg:#f6f6f4;--ink:#1b1e24;--ink2:#5a5f68;--line:#ddddd6;--card:#fff;--win:#e4f0e9;--accent:#1f6d5a}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{border-bottom:2px solid var(--ink);padding:14px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0}
+  header a{color:var(--accent);font-size:13px}
+  select,button{font:inherit;padding:4px 8px}
+  .wrap{max-width:900px;margin:0 auto;padding:20px;overflow-x:auto}
+  table{border-collapse:collapse;width:100%;background:var(--card);font-variant-numeric:tabular-nums}
+  th{font:700 10px/1.3 ui-monospace,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;
+     color:var(--ink2);text-align:left;padding:8px 10px;border-bottom:2px solid var(--line)}
+  td{padding:6px 10px;border-bottom:1px solid var(--line)}
+  tr.win{background:var(--win);font-weight:600}
+  .note{color:var(--ink2);font-size:12px;max-width:56rem;margin:10px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Auction Panel — why did this ad win?</h1>
+  <label>Persona
+    <select id="user">{% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}</select>
+  </label>
+  <label>Topic
+    <select id="topic">{% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+  </label>
+  <label><input type="checkbox" id="cal" checked> calibrated pCTR</label>
+  <button id="run">Run auction</button>
+  <a href="/">back to feed</a>
+</header>
+<div class="wrap">
+  <p class="note">Ranking rule: <b>ad_rank = bid × pCTR</b> — expected value, not bid alone.
+  Pricing: GSP — each winner pays the minimum CPC that still beats the next ad_rank
+  (runner-up ad_rank ÷ winner pCTR + $0.01), capped at its own bid. Toggle "calibrated"
+  off to watch prices distort under the raw model: same ads, wrong prices.</p>
+  <table id="board"><thead><tr>
+    <th>slot</th><th>advertiser</th><th>category</th><th>bid $</th><th>pCTR</th>
+    <th>ad_rank</th><th>pays $/click</th>
+  </tr></thead><tbody></tbody></table>
+</div>
+<script>
+async function run() {
+  const u = document.getElementById("user").value;
+  const t = document.getElementById("topic").value;
+  const c = document.getElementById("cal").checked;
+  const r = await fetch(`/debug/auction?user_id=${u}&page_category=${t}&calibrated=${c}`);
+  const d = await r.json();
+  const tb = document.querySelector("#board tbody");
+  tb.innerHTML = "";
+  d.board.forEach(a => {
+    const tr = document.createElement("tr");
+    if (a.slot !== null) tr.className = "win";
+    tr.innerHTML = `<td>${a.slot === null ? "—" : a.slot + 1}</td><td>${a.advertiser}</td>
+      <td>${a.category}</td><td>${a.bid.toFixed(2)}</td><td>${a.pctr.toFixed(4)}</td>
+      <td>${a.ad_rank.toFixed(4)}</td><td>${a.price === null ? "—" : a.price.toFixed(3)}</td>`;
+    tb.appendChild(tr);
+  });
+}
+document.getElementById("run").onclick = run;
+run();
+</script>
+</body>
+</html>

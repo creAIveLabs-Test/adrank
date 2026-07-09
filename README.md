@@ -45,7 +45,7 @@ on the public Avazu dataset (~40M real ad impressions).
 - [x] Stage 1 — offline eval harness + baselines (random / popularity / logistic regression / oracle)
 - [x] Stage 2 — pCTR model (champion selection: LR vs GBDT) + isotonic calibration
 - [x] Stage 3 — two-tower retrieval (PyTorch, in-batch negatives + logQ correction, numpy serving export)
-- [ ] Stage 4 — GSP auction, budget pacing, auction debug panel
+- [x] Stage 4 — GSP auction (ad_rank = bid x pCTR, second-price with reserve) + auction debug panel at /auction
 - [ ] Stage 5 — experiments platform (bucketed A/B), Thompson exploration, nightly retrain loop
 
 ## Results so far
@@ -63,6 +63,14 @@ ranking compute) and pays ~12% relative CTR for it — the retrieval/precision
 tradeoff, measured. Retrieval recall@50: two-tower 0.36, popularity 0.38,
 union 0.39, random 0.12; the logQ sampling correction was worth +0.05
 recall@25 (in-batch negatives otherwise punish popular ads).
+
+Auction (rev per 1k impressions): auction-v3 $76.67 at 5.4% CTR vs pctr-v1
+$50.76 at 6.9% CTR vs random $20.43 at 3.1% CTR. Ranking by bid x pCTR
+trades ~1.5 points of CTR for +51% revenue per impression — even while GSP
+charges second prices instead of full bids. CTR-optimal is not
+revenue-optimal; the auction is where that tension is priced. The /auction
+panel shows any request's full board (bid, pCTR, ad_rank, price paid) and a
+calibration toggle that demonstrates how a hot model misprices clicks.
 
 ## Run it
 

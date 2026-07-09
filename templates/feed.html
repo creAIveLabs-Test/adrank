@@ -77,7 +77,8 @@ async function browse() {
         ad.classList.add("clicked");
         await fetch("/event", {method:"POST", headers:{"Content-Type":"application/json"},
           body: JSON.stringify({user_id:+user, ad_id:slot.ad_id, position:slot.position,
-                                page_category:topic, served_by:served.served_by})});
+                                page_category:topic, served_by:served.served_by,
+                                price:slot.price})});
         refreshStats();
       };
       feed.appendChild(ad);

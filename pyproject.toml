@@ -19,6 +19,7 @@ ml = [
     "pandas>=2.2",
     "matplotlib>=3.8",
     "joblib>=1.3",
+    "torch>=2.2",
 ]
 
 [tool.uv]

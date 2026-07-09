@@ -44,7 +44,7 @@ on the public Avazu dataset (~40M real ad impressions).
 - [x] Stage 0 — the world: ad inventory, synthetic users, feed UI, event logging, random-serving baseline
 - [x] Stage 1 — offline eval harness + baselines (random / popularity / logistic regression / oracle)
 - [x] Stage 2 — pCTR model (champion selection: LR vs GBDT) + isotonic calibration
-- [ ] Stage 3 — two-tower retrieval + ANN
+- [x] Stage 3 — two-tower retrieval (PyTorch, in-batch negatives + logQ correction, numpy serving export)
 - [ ] Stage 4 — GSP auction, budget pacing, auction debug panel
 - [ ] Stage 5 — experiments platform (bucketed A/B), Thompson exploration, nightly retrain loop
 
@@ -56,8 +56,13 @@ here — the click function is smooth and near-log-linear in the CTR features, s
 LR's inductive bias wins at ~1k positives; at real ads scale the ordering flips,
 which is why deep CTR models exist. Reliability diagram: reports/.
 
-Online (live serving): random-v0 CTR 3.07% (36k imps) -> pctr-v1 CTR 6.85%
-(9k imps) — 2.2x uplift from the learned, calibrated ranker.
+Online (live serving): random-v0 CTR 3.07% (36k imps) -> pctr-v1 CTR 6.91%
+(9k imps, 2.2x) -> twotower-v2 CTR 6.11% (9k imps). The funnel policy ranks
+only ~50 retrieved candidates instead of all 500 eligible ads (10x less
+ranking compute) and pays ~12% relative CTR for it — the retrieval/precision
+tradeoff, measured. Retrieval recall@50: two-tower 0.36, popularity 0.38,
+union 0.39, random 0.12; the logQ sampling correction was worth +0.05
+recall@25 (in-batch negatives otherwise punish popular ads).
 
 ## Run it
 

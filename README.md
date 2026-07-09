@@ -42,7 +42,7 @@ on the public Avazu dataset (~40M real ad impressions).
 ## Build stages
 
 - [x] Stage 0 — the world: ad inventory, synthetic users, feed UI, event logging, random-serving baseline
-- [ ] Stage 1 — offline eval harness + baselines (random / popularity / logistic regression / oracle)
+- [x] Stage 1 — offline eval harness + baselines (random / popularity / logistic regression / oracle)
 - [ ] Stage 2 — pCTR model (LightGBM) + isotonic calibration + Avazu validation
 - [ ] Stage 3 — two-tower retrieval + ANN
 - [ ] Stage 4 — GSP auction, budget pacing, auction debug panel

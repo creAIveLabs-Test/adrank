@@ -85,6 +85,34 @@ its own logs and hot-swapped the server. Two-tower recall@25 went 0.25 ->
 exploration slots (~8% of impressions at ~1.3% CTR) are the tax that keeps
 training data honest.
 
+## Feel the job (stage 6 — ops mode)
+
+The dashboard at /dashboard is the working surface: stat tiles (impressions,
+CTR, revenue, explore share, calibration ECE with a health pill), CTR and
+revenue-per-1k by experiment arm over time, the live experiment readout with
+significance, and a calibration monitor (current model vs recent live traffic,
+per decile). Bulk traffic: `--direct` runs the funnel in-process (~200k+
+impressions accumulate fast).
+
+The oncall game — incident drills via `adrank.chaos`:
+
+```bash
+uv run python -m adrank.chaos --drill random   # something breaks. no peeking.
+# stare at /dashboard, diagnose out loud, then:
+uv run python -m adrank.chaos --reveal         # check your answer
+uv run python -m adrank.chaos --restore        # undo
+```
+
+Drills: bot traffic (CTR spikes, actual >> predicted), interest drift (CTR
+sags, predicted >> actual — fix by retraining), stale model rollout (CTR
+holds but calibration goes red and GSP prices distort — the quiet incident).
+
+Incidents already survived for real, in order: calibration drifted after the
+flywheel retrain (the winner's curse — the model's own picks select its
+over-predictions); the first recalibration made it WORSE (training/serving
+skew: calibrator fit on features serving never computes); the skew-correct
+`retrain --calibrate-only` took live ECE 0.033 -> 0.004.
+
 ## Run it
 
 ```bash
@@ -92,7 +120,10 @@ uv sync
 uv run python -m adrank.seed                                  # create the world
 uv run uvicorn adrank.server:app --port 8100                  # start the ad server
 open http://127.0.0.1:8100                                    # browse as a persona
-uv run python -m adrank.simulator --sessions 500              # generate traffic
+uv run python -m adrank.simulator --sessions 500              # generate traffic (HTTP)
+uv run python -m adrank.simulator --sessions 5000 --direct    # bulk traffic (in-process)
+uv run python -m adrank.retrain --calibrate-only              # light recalibration loop
+open http://127.0.0.1:8100/dashboard                          # the ops surface
 curl -s http://127.0.0.1:8100/stats | python3 -m json.tool    # watch counters
 ```
 

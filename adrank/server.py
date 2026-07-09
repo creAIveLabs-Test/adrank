@@ -121,6 +121,111 @@ def auction_page(request: Request):
         request, "auction.html", {"users": users, "categories": CATEGORIES})
 
 
+@app.get("/metrics/timeseries")
+def metrics_timeseries(bucket_minutes: int = 10, hours: int = 12):
+    """Ops dashboard feed: per-time-bucket, per-arm impressions/clicks/CTR/rev,
+    plus explore share. Buckets are UTC-epoch-aligned."""
+    from datetime import datetime, timedelta, timezone
+
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    with get_session() as s:
+        rows = s.exec(select(Event).where(Event.ts >= since)).all()
+    size = bucket_minutes * 60
+    buckets: dict[int, dict] = {}
+    for ev in rows:
+        ts = ev.ts.replace(tzinfo=timezone.utc) if ev.ts.tzinfo is None else ev.ts
+        b = int(ts.timestamp() // size * size)
+        base = ev.served_by.split("+")[0]
+        d = buckets.setdefault(b, {})
+        a = d.setdefault(base, {"imps": 0, "clicks": 0, "rev": 0.0, "explore_imps": 0})
+        if ev.event_type == "impression":
+            a["imps"] += 1
+            if ev.served_by.endswith("+explore"):
+                a["explore_imps"] += 1
+        else:
+            a["clicks"] += 1
+            a["rev"] += ev.price_paid
+    out = []
+    for b in sorted(buckets):
+        entry = {"t": b, "arms": {}}
+        for arm, a in buckets[b].items():
+            entry["arms"][arm] = {
+                "imps": a["imps"], "clicks": a["clicks"],
+                "ctr": round(a["clicks"] / a["imps"], 4) if a["imps"] else None,
+                "rev_per_1k": round(1000 * a["rev"] / a["imps"], 2) if a["imps"] else None,
+                "explore_share": round(a["explore_imps"] / a["imps"], 3) if a["imps"] else 0,
+            }
+        out.append(entry)
+    return {"bucket_minutes": bucket_minutes, "series": out}
+
+
+@app.get("/debug/calibration")
+def debug_calibration(last_n: int = 8000):
+    """Monitoring, not the offline harness: score the last N impressions with
+    the CURRENT model and compare predicted pCTR vs actual CTR per decile.
+    Reads like a reliability diagram over recent live traffic — this is the
+    chart that catches drift and stale models."""
+    import json as _json
+    from pathlib import Path
+
+    import joblib
+    import numpy as np
+
+    from .pctr_model import featurize_serving
+
+    models_dir = Path(__file__).resolve().parent.parent / "models"
+    model = joblib.load(models_dir / "pctr_model.joblib")
+    aggs = _json.loads((models_dir / "pctr_aggs.json").read_text())
+
+    from collections import defaultdict
+
+    with get_session() as s:
+        recent = s.exec(select(Event).order_by(Event.ts.desc(), Event.id.desc())
+                        .limit(int(last_n * 1.2))).all()
+        ads = {a.id: a for a in s.exec(select(Ad)).all()}
+    recent.reverse()   # chronological
+
+    # Same matcher as eval.py: a click consumes its most recent open impression.
+    # Set-membership matching is wrong here — one click would label every repeat
+    # of the same (user, ad, slot, page) combo as clicked (found the hard way:
+    # top-decile "actual CTR" read 35%).
+    cands, y = [], []
+    open_imps: dict[tuple, list[int]] = defaultdict(list)
+    for ev in recent:
+        key = (ev.user_id, ev.ad_id, ev.position, ev.page_category)
+        if ev.event_type == "impression":
+            ad = ads.get(ev.ad_id)
+            if not ad:
+                continue
+            cands.append({"user_id": ev.user_id, "ad_id": ev.ad_id,
+                          "ad_category": ad.category, "bid": ad.bid,
+                          "context_match": int(ev.page_category == ad.category)})
+            y.append(0)
+            open_imps[key].append(len(y) - 1)
+        elif open_imps[key]:
+            y[open_imps[key].pop()] = 1
+    if not cands:
+        return {"bins": [], "ece": None}
+    p = model.predict(featurize_serving(cands, aggs))
+    y = np.array(y)
+    edges = np.quantile(p, np.linspace(0, 1, 11))
+    idx = np.clip(np.searchsorted(edges, p, side="right") - 1, 0, 9)
+    bins, ece = [], 0.0
+    for b in range(10):
+        m = idx == b
+        if m.sum():
+            bins.append({"predicted": round(float(p[m].mean()), 4),
+                         "actual": round(float(y[m].mean()), 4),
+                         "n": int(m.sum())})
+            ece += m.mean() * abs(p[m].mean() - y[m].mean())
+    return {"n": len(y), "ece": round(float(ece), 4), "bins": bins}
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard(request: Request):
+    return templates.TemplateResponse(request, "dashboard.html", {})
+
+
 @app.get("/experiment")
 def experiment_readout():
     from .experiment import readout

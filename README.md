@@ -46,7 +46,7 @@ on the public Avazu dataset (~40M real ad impressions).
 - [x] Stage 2 — pCTR model (champion selection: LR vs GBDT) + isotonic calibration
 - [x] Stage 3 — two-tower retrieval (PyTorch, in-batch negatives + logQ correction, numpy serving export)
 - [x] Stage 4 — GSP auction (ad_rank = bid x pCTR, second-price with reserve) + auction debug panel at /auction
-- [ ] Stage 5 — experiments platform (bucketed A/B), Thompson exploration, nightly retrain loop
+- [x] Stage 5 — experiments platform (hash-bucketed A/B + z-test), Thompson exploration slots, retrain + hot-swap loop
 
 ## Results so far
 
@@ -71,6 +71,19 @@ charges second prices instead of full bids. CTR-optimal is not
 revenue-optimal; the auction is where that tension is priced. The /auction
 panel shows any request's full board (bid, pCTR, ad_rank, price paid) and a
 calibration toggle that demonstrates how a hot model misprices clicks.
+
+Experiment (clean window, 13.5k impressions, /experiment): pctr-v1 arm CTR
+6.73% at $42.62/1k vs auction-v3 arm CTR 5.21% at $61.12/1k — the CTR drop is
+statistically significant (z=-3.67, p=0.0002) and buys +43% revenue. Lab
+note: the first readout silently absorbed pre-experiment traffic into both
+arms; arm counts now filter on the experiment start time.
+
+The flywheel: after the traffic above, `adrank.retrain` re-fit everything on
+its own logs and hot-swapped the server. Two-tower recall@25 went 0.25 ->
+0.53 (now well past popularity's 0.36) and pCTR calibration AUC 0.63 -> 0.70
+— the system measurably improves itself from data it generated. Thompson
+exploration slots (~8% of impressions at ~1.3% CTR) are the tax that keeps
+training data honest.
 
 ## Run it
 

@@ -45,17 +45,17 @@ def serve_ads(user_id: int, page_category: str):
     with get_session() as s:
         if not s.get(SimUser, user_id):
             raise HTTPException(404, "unknown user")
-        ads, prices, version = serve(s, page_category, user_id)
+        ads, prices, tags = serve(s, page_category, user_id)
         for pos, ad in enumerate(ads):
             s.add(Event(event_type="impression", user_id=user_id, ad_id=ad.id,
-                        position=pos, page_category=page_category, served_by=version))
+                        position=pos, page_category=page_category, served_by=tags[pos]))
         s.commit()
         return {
-            "served_by": version,
+            "served_by": tags[0] if tags else "none",
             "ads": [
                 {"ad_id": ad.id, "position": pos, "advertiser": ad.advertiser,
                  "headline": ad.headline, "category": ad.category,
-                 "price": prices[pos]}
+                 "price": prices[pos], "served_by": tags[pos]}
                 for pos, ad in enumerate(ads)
             ],
         }
@@ -119,6 +119,25 @@ def auction_page(request: Request):
         users = s.exec(select(SimUser).limit(30)).all()
     return templates.TemplateResponse(
         request, "auction.html", {"users": users, "categories": CATEGORIES})
+
+
+@app.get("/experiment")
+def experiment_readout():
+    from .experiment import readout
+    with get_session() as s:
+        return readout(s)
+
+
+@app.post("/admin/reload-models")
+def reload_models():
+    """Hot-swap: clear model caches so the next request loads fresh artifacts.
+    Called by the retrain loop after it rewrites models/."""
+    from . import ranker
+    ranker._PCTR_MODEL = None
+    ranker._PCTR_AGGS = None
+    ranker._TT = None
+    ranker._TS_CACHE["stats"] = None
+    return {"reloaded": True}
 
 
 @app.get("/stats")

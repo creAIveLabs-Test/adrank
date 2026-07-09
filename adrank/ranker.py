@@ -191,11 +191,41 @@ POLICIES = {"random-v0": serve_random, "pctr-v1": serve_pctr,
 ACTIVE_POLICY = "auction-v3"
 
 
-def serve(session: Session, page_category: str, user_id: int):
-    """Returns (ads, prices, version). Pre-auction policies charge the full
-    bid on click (first-price billing) — kept that way on purpose so the
-    revenue comparison between naive billing and GSP stays visible."""
-    policy = POLICIES[ACTIVE_POLICY]
+EXPLORE_RATE = 0.10          # fraction of requests whose last slot explores
+_TS_CACHE = {"ts": 0.0, "stats": None}
+
+
+def _thompson_pick(session: Session, page_category: str, exclude: set[int]):
+    """Thompson sampling over per-ad Beta(clicks+1, imps-clicks+1) posteriors.
+    Keeps training data honest: without exploration the model only ever
+    learns about ads it already likes, and new ads starve."""
+    import time as _time
+
+    import numpy as np
+    from sqlmodel import func, select as _select
+
+    from .models import Event
+
+    now = _time.time()
+    if _TS_CACHE["stats"] is None or now - _TS_CACHE["ts"] > 60:
+        imps = dict(session.exec(_select(Event.ad_id, func.count()).where(
+            Event.event_type == "impression").group_by(Event.ad_id)).all())
+        clicks = dict(session.exec(_select(Event.ad_id, func.count()).where(
+            Event.event_type == "click").group_by(Event.ad_id)).all())
+        _TS_CACHE.update(ts=now, stats=(imps, clicks))
+    imps, clicks = _TS_CACHE["stats"]
+
+    pool = [ad for ad in eligible_ads(session, page_category) if ad.id not in exclude]
+    if not pool:
+        return None
+    samples = [np.random.beta(clicks.get(ad.id, 0) + 1,
+                              max(imps.get(ad.id, 0) - clicks.get(ad.id, 0), 0) + 1)
+               for ad in pool]
+    return pool[int(np.argmax(samples))]
+
+
+def _base_serve(session: Session, page_category: str, user_id: int, policy_name: str):
+    policy = POLICIES[policy_name]
     if policy is serve_auction:
         return policy(session, page_category, user_id)
     if policy is serve_random:
@@ -203,3 +233,29 @@ def serve(session: Session, page_category: str, user_id: int):
     else:
         ads, v = policy(session, page_category, user_id)
     return ads, [ad.bid for ad in ads], v
+
+
+def serve(session: Session, page_category: str, user_id: int):
+    """Returns (ads, prices, tags) — one served_by tag PER SLOT.
+
+    Order of operations: (1) experiment bucketing picks the policy arm,
+    (2) the policy fills the slots, (3) with probability EXPLORE_RATE the
+    last slot is replaced by a Thompson-sampled eligible ad, tagged
+    "<policy>+explore" so exploration traffic never contaminates arm
+    readouts. Explore clicks are charged the reserve price — the slot was
+    not auctioned."""
+    import random as _random
+
+    from .auction import RESERVE_PRICE
+    from .experiment import EXPERIMENT, assign
+
+    policy_name = (EXPERIMENT["arms"][assign(user_id)]
+                   if EXPERIMENT["enabled"] else ACTIVE_POLICY)
+    ads, prices, version = _base_serve(session, page_category, user_id, policy_name)
+    tags = [version] * len(ads)
+
+    if ads and _random.random() < EXPLORE_RATE:
+        pick = _thompson_pick(session, page_category, exclude={a.id for a in ads})
+        if pick is not None:
+            ads[-1], prices[-1], tags[-1] = pick, RESERVE_PRICE, f"{version}+explore"
+    return ads, prices, tags

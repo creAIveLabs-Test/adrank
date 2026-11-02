@@ -1,6 +1,5 @@
 # AdRank
-<img src="./adrank-banner.png" width="100%" alt="AdRank selects one sponsored ad from several candidates for a simulated user's feed.">
-
+<img src="./AdRank_%20Choosing%20the%20Winning%20Ad.png" width="100%" alt="AdRank shows how an auction selects a sponsored ad for a simulated user.">
 AdRank simulates how a platform chooses which ad to show. It finds ads that match a user's interests, predicts how likely the user is to click each one, and combines that prediction with the advertiser's bid to run an auction.
 
 You can compare two strategies on the same simulated traffic: choose the ad most likely to get a click, or choose the ad with the highest bid × predicted click probability. In one A/B test, the auction earned 43% more revenue per 1,000 impressions, while the click-through rate fell from 6.73% to 5.21%.
